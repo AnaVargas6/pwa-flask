@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard Trajes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Manifest PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#b83280">
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 22px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #ffe6f2 0, #fce7f3 30%, #f3e8ff 55%, #e0f2fe 100%);
+      min-height: 100vh;
+      color: #374151;
+    }
+
+    header {
+      background: #ffffffcc;
+      backdrop-filter: blur(4px);
+      padding: 14px 20px;
+      border-radius: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+      margin-bottom: 26px;
+      border: 1px solid #ffffffaa;
+    }
+
+    h2 {
+      margin: 0;
+      color: #b83280;
+      font-weight: 800;
+      font-size: 1.6rem;
+      letter-spacing: -0.5px;
+    }
+
+    .badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-right: 10px;
+    }
+
+    .online {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .offline {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    button {
+      padding: 8px 16px;
+      border-radius: 25px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      background: linear-gradient(135deg, #b83280, #2563eb);
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(184,50,128,0.30);
+      transition: transform .15s, box-shadow .15s, filter .15s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.05);
+      box-shadow: 0 10px 28px rgba(184,50,128,0.40);
+    }
+
+    section {
+      margin-bottom: 20px;
+      background: #ffffffcc;
+      border-radius: 16px;
+      padding: 20px;
+      backdrop-filter: blur(5px);
+      border: 1px solid #ffffffaa;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.07);
+    }
+
+    h3 {
+      margin-top: 0;
+      color: #9333ea;
+      font-weight: 700;
+    }
+
+    input[type="text"] {
+      padding: 10px;
+      border-radius: 12px;
+      border: 1px solid #d1d5db;
+      width: 250px;
+      max-width: 100%;
+      font-size: 0.95rem;
+      outline: none;
+      background: #f9fafb;
+      transition: border-color .2s, box-shadow .2s, background .2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: #b83280;
+      box-shadow: 0 0 0 2px rgba(184,50,128,0.2);
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+      margin-top: 15px;
+    }
+
+    th {
+      background: linear-gradient(135deg, #b83280, #9333ea);
+      color: #fff;
+      padding: 10px;
+      font-size: 0.9rem;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    td {
+      background: #ffffffdd;
+      padding: 10px;
+      border-bottom: 1px solid #f3e8ff;
+      font-size: 0.9rem;
+    }
+
+    tr:hover td {
+      background: #fdf2f8;
+    }
+
+    small {
+      color: #6b7280;
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h2>Gestión de Trajes 👗✨</h2>
+    <div>
+      <span id="estadoConexion" class="badge"></span>
+      <button onclick="cerrarSesion()">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <section>
+    <h3>Búsqueda de trajes</h3>
+    <p>
+      <input type="text" id="inputBusqueda" placeholder="Buscar por descripción o estado...">
+      <button onclick="buscarTrajes()">Buscar</button>
+      <button onclick="limpiarBusqueda()">Limpiar</button>
+    </p>
+    <small>📌 Las búsquedas se guardan en localStorage para usarlas sin internet.</small>
+  </section>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Descripción</th>
+        <th>Estado</th>
+        <th>Cantidad Rentas</th>
+      </tr>
+    </thead>
+    <tbody id="tbodyTrajes"></tbody>
+  </table>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .catch(err => console.error('SW registro falló', err));
+      });
+    }
+
+    const API_URL = 'backend/trajes_buscar.php';
+    const ESTADO_EL = document.getElementById('estadoConexion');
+    const TBODY     = document.getElementById('tbodyTrajes');
+    const INPUT_BUS = document.getElementById('inputBusqueda');
+
+    if (localStorage.getItem('logueadoTrajes') !== '1') {
+      window.location.href = 'index.html';
+    }
+
+    function actualizarBadgeConexion() {
+      if (navigator.onLine) {
+        ESTADO_EL.textContent = 'Online (servidor)';
+        ESTADO_EL.className = 'badge online';
+      } else {
+        ESTADO_EL.textContent = 'Offline (datos locales)';
+        ESTADO_EL.className = 'badge offline';
+      }
+    }
+
+    window.addEventListener('online',  () => { actualizarBadgeConexion(); cargarTrajes(); });
+    window.addEventListener('offline', () => { actualizarBadgeConexion(); usarCache(); });
+
+    actualizarBadgeConexion();
+
+    function pintarTabla(trajes) {
+      TBODY.innerHTML = '';
+      if (!trajes || trajes.length === 0) {
+        TBODY.innerHTML = '<tr><td colspan="4">Sin resultados</td></tr>';
+        return;
+      }
+
+      trajes.forEach(t => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${t.id}</td>
+          <td>${t.descripcion}</td>
+          <td>${t.estado}</td>
+          <td>${t.cantidadRentas}</td>
+        `;
+        TBODY.appendChild(tr);
+      });
+    }
+
+    function guardarEnCache(lista, termino) {
+      const cache = {
+        fecha: new Date().toISOString(),
+        termino: termino || '',
+        trajes: lista
+      };
+      localStorage.setItem('cacheTrajes', JSON.stringify(cache));
+    }
+
+    function usarCache(termino = '') {
+      const data = localStorage.getItem('cacheTrajes');
+      if (!data) {
+        pintarTabla([]);
+        return;
+      }
+      const cache = JSON.parse(data);
+      let lista = cache.trajes || [];
+
+      if (termino && termino.trim() !== '') {
+        const q = termino.toLowerCase();
+        lista = lista.filter(t =>
+          t.descripcion.toLowerCase().includes(q) ||
+          t.estado.toLowerCase().includes(q)
+        );
+      }
+      pintarTabla(lista);
+    }
+
+    function cargarTrajes(termino = '') {
+      if (!navigator.onLine) {
+        usarCache(termino);
+        return;
+      }
+
+      const url = termino
+        ? `${API_URL}?q=${encodeURIComponent(termino)}`
+        : API_URL;
+
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) {
+            pintarTabla(data.trajes);
+            guardarEnCache(data.trajes, termino);
+          } else {
+            usarCache(termino);
+          }
+        })
+        .catch(err => {
+          console.error('Error fetch:', err);
+          usarCache(termino);
+        });
+    }
+
+    function buscarTrajes() {
+      const termino = INPUT_BUS.value.trim();
+      cargarTrajes(termino);
+    }
+
+    function limpiarBusqueda() {
+      INPUT_BUS.value = '';
+      cargarTrajes('');
+    }
+
+    function cerrarSesion() {
+      localStorage.removeItem('logueadoTrajes');
+      window.location.href = 'index.html';
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      cargarTrajes('');
+    });
+  </script>
+</body>
+</html>
