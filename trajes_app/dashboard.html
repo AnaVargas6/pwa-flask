@@ -147,6 +147,21 @@
       color: #6b7280;
       font-size: 0.8rem;
     }
+
+    /* Botones de acciones dentro de la tabla */
+    .btn-accion {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      margin-right: 4px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.10);
+    }
+
+    .btn-accion:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
   </style>
 </head>
 
@@ -166,7 +181,7 @@
       <button onclick="buscarTrajes()">Buscar</button>
       <button onclick="limpiarBusqueda()">Limpiar</button>
     </p>
-    <small>📌 Las búsquedas se guardan en localStorage para usarlas sin internet.</small>
+    <small>📌 Las búsquedas y acciones se guardan en localStorage. Las ediciones/eliminaciones solo se permiten cuando hay internet.</small>
   </section>
 
   <table>
@@ -176,12 +191,14 @@
         <th>Descripción</th>
         <th>Estado</th>
         <th>Cantidad Rentas</th>
+        <th>Acciones</th> <!-- Nuevo encabezado -->
       </tr>
     </thead>
     <tbody id="tbodyTrajes"></tbody>
   </table>
 
   <script>
+    // Registro del Service Worker
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('service-worker.js')
@@ -189,23 +206,46 @@
       });
     }
 
-    const API_URL = 'backend/trajes_buscar.php';
+    const API_URL   = 'backend/trajes_buscar.php';
     const ESTADO_EL = document.getElementById('estadoConexion');
     const TBODY     = document.getElementById('tbodyTrajes');
     const INPUT_BUS = document.getElementById('inputBusqueda');
 
+    // Verificación de sesión
     if (localStorage.getItem('logueadoTrajes') !== '1') {
       window.location.href = 'index.html';
     }
 
+    // --- LocalStorage de acciones: editar / eliminar ---
+    function registrarAccion(tipo, detalle) {
+      const lista = JSON.parse(localStorage.getItem('accionesTrajes') || '[]');
+      lista.push({
+        tipo,                      // 'editar' o 'eliminar'
+        detalle,                  // objeto con info del traje
+        fecha: new Date().toLocaleString()
+      });
+      localStorage.setItem('accionesTrajes', JSON.stringify(lista));
+      console.log('Acción registrada en localStorage:', tipo, detalle);
+    }
+
+    // Badge de conexión
     function actualizarBadgeConexion() {
       if (navigator.onLine) {
         ESTADO_EL.textContent = 'Online (servidor)';
         ESTADO_EL.className = 'badge online';
       } else {
-        ESTADO_EL.textContent = 'Offline (datos locales)';
+        ESTADO_EL.textContent = 'Offline (datos locales, sin editar/eliminar)';
         ESTADO_EL.className = 'badge offline';
       }
+      actualizarEstadoBotonesAccion();
+    }
+
+    // Habilitar/Deshabilitar botones de acción según conexión
+    function actualizarEstadoBotonesAccion() {
+      const online = navigator.onLine;
+      document.querySelectorAll('.btn-accion').forEach(btn => {
+        btn.disabled = !online;
+      });
     }
 
     window.addEventListener('online',  () => { actualizarBadgeConexion(); cargarTrajes(); });
@@ -213,10 +253,11 @@
 
     actualizarBadgeConexion();
 
+    // Pintar tabla de trajes
     function pintarTabla(trajes) {
       TBODY.innerHTML = '';
       if (!trajes || trajes.length === 0) {
-        TBODY.innerHTML = '<tr><td colspan="4">Sin resultados</td></tr>';
+        TBODY.innerHTML = '<tr><td colspan="5">Sin resultados</td></tr>'; // ahora 5 columnas
         return;
       }
 
@@ -227,11 +268,19 @@
           <td>${t.descripcion}</td>
           <td>${t.estado}</td>
           <td>${t.cantidadRentas}</td>
+          <td>
+            <button class="btn-accion btn-editar">Editar</button>
+            <button class="btn-accion btn-eliminar">Eliminar</button>
+          </td>
         `;
         TBODY.appendChild(tr);
       });
+
+      // Después de crear filas, ajustar botones según conexión
+      actualizarEstadoBotonesAccion();
     }
 
+    // Cache de resultados de búsqueda
     function guardarEnCache(lista, termino) {
       const cache = {
         fecha: new Date().toISOString(),
@@ -260,6 +309,7 @@
       pintarTabla(lista);
     }
 
+    // Cargar trajes desde el servidor (si hay internet) o cache
     function cargarTrajes(termino = '') {
       if (!navigator.onLine) {
         usarCache(termino);
@@ -301,6 +351,131 @@
       window.location.href = 'index.html';
     }
 
+    // --- Utilidades para edición y eliminación ---
+
+    // Obtener datos de la fila clickeada
+    function obtenerDatosDesdeFila(fila) {
+      const celdas = fila.querySelectorAll('td');
+      return {
+        id: celdas[0].textContent,
+        descripcion: celdas[1].textContent,
+        estado: celdas[2].textContent,
+        cantidadRentas: celdas[3].textContent
+      };
+    }
+
+    async function editarTraje(traje, fila) {
+      if (!navigator.onLine) {
+        alert('No hay conexión. No se puede editar mientras estés offline.');
+        return;
+      }
+
+      const nuevaDescripcion = prompt('Nueva descripción:', traje.descripcion);
+      if (nuevaDescripcion === null) return;
+
+      const nuevoEstado = prompt('Nuevo estado:', traje.estado);
+      if (nuevoEstado === null) return;
+
+      const nuevaCantidad = prompt('Nueva cantidad de rentas:', traje.cantidadRentas);
+      if (nuevaCantidad === null) return;
+
+      try {
+        // Ajusta la URL y método según tu backend real
+        const formData = new FormData();
+        formData.append('id', traje.id);
+        formData.append('descripcion', nuevaDescripcion);
+        formData.append('estado', nuevoEstado);
+        formData.append('cantidadRentas', nuevaCantidad);
+
+        const res = await fetch('backend/trajes_editar.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        if (data.ok) {
+          // Actualizar la fila en pantalla
+          const celdas = fila.querySelectorAll('td');
+          celdas[1].textContent = nuevaDescripcion;
+          celdas[2].textContent = nuevoEstado;
+          celdas[3].textContent = nuevaCantidad;
+
+          // Guardar la acción en localStorage
+          registrarAccion('editar', {
+            id: traje.id,
+            descripcionAntes: traje.descripcion,
+            estadoAntes: traje.estado,
+            cantidadAntes: traje.cantidadRentas,
+            descripcionDespues: nuevaDescripcion,
+            estadoDespues: nuevoEstado,
+            cantidadDespues: nuevaCantidad
+          });
+
+          alert('Traje actualizado correctamente.');
+        } else {
+          alert('No se pudo actualizar en el servidor.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error al conectar con el servidor.');
+      }
+    }
+
+    async function eliminarTraje(traje, fila) {
+      if (!navigator.onLine) {
+        alert('No hay conexión. No se puede eliminar mientras estés offline.');
+        return;
+      }
+
+      if (!confirm(`¿Seguro que deseas eliminar el traje con ID ${traje.id}?`)) {
+        return;
+      }
+
+      try {
+        // Ajusta la URL y método según tu backend real
+        const res = await fetch(`backend/trajes_eliminar.php?id=${encodeURIComponent(traje.id)}`, {
+          method: 'GET'
+        });
+
+        const data = await res.json();
+        if (data.ok) {
+          // Eliminar la fila de la tabla
+          fila.remove();
+
+          // Registrar acción en localStorage
+          registrarAccion('eliminar', traje);
+
+          alert('Traje eliminado correctamente.');
+        } else {
+          alert('No se pudo eliminar en el servidor.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error al conectar con el servidor.');
+      }
+    }
+
+    // Delegación de eventos para los botones Editar / Eliminar
+    TBODY.addEventListener('click', (e) => {
+      const btn = e.target;
+
+      // Solo actuar si el botón no está deshabilitado
+      if (btn.disabled) return;
+
+      if (btn.classList.contains('btn-editar')) {
+        const fila = btn.closest('tr');
+        const datos = obtenerDatosDesdeFila(fila);
+        editarTraje(datos, fila);
+      }
+
+      if (btn.classList.contains('btn-eliminar')) {
+        const fila = btn.closest('tr');
+        const datos = obtenerDatosDesdeFila(fila);
+        eliminarTraje(datos, fila);
+      }
+    });
+
+    // Carga inicial
     window.addEventListener('DOMContentLoaded', () => {
       cargarTrajes('');
     });
